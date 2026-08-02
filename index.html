@@ -56,6 +56,32 @@
               <button id="mem-clear-btn" class="btn-memory" title="メモリをクリア (MC)">MC</button>
             </div>
           </div>
+          
+          <!-- 保存スロット管理コントロール -->
+          <div class="slot-container" style="padding: 0 20px 16px 20px; border-bottom: 1px dashed var(--border); margin-bottom: 16px;">
+            <div class="form-group" style="margin-bottom: 0;">
+              <label for="slot-select" class="form-label">保存先口座スロット</label>
+              <div class="slot-control-group" style="display: flex; gap: 8px; align-items: center;">
+                <select id="slot-select" class="form-input" style="flex: 1; min-width: 120px;"></select>
+                <input type="text" id="slot-name-input" class="form-input" style="flex: 1; min-width: 120px;" placeholder="スロット名（例：口座A）">
+                <button id="slot-add-btn" class="btn-primary" style="padding: 8px 12px; height: 38px; display: flex; align-items: center; justify-content: center; gap: 4px;" title="現在の設定を複製して新しいスロットを追加">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                  </svg>
+                  追加
+                </button>
+                <button id="slot-del-btn" class="btn-danger" style="padding: 8px 12px; height: 38px; display: flex; align-items: center; justify-content: center; gap: 4px; background-color: var(--danger-light); color: var(--danger); border-color: var(--danger-light);" title="現在のスロットを削除">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                  </svg>
+                  削除
+                </button>
+              </div>
+            </div>
+          </div>
+          
           <div class="form-group-grid">
             <div class="form-group">
               <label for="account-balance" class="form-label">口座残高 (円)</label>

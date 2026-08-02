@@ -37,7 +37,20 @@ let state = {
   }
 };
 
+// スロット管理用データ
+let slotsData = {
+  activeSlotId: 'slot-1',
+  slots: {
+    'slot-1': {
+      id: 'slot-1',
+      name: '口座A (メイン)',
+      state: null // 初期化時に初期stateがクローンされます
+    }
+  }
+};
+
 let assetChart = null;
+let saveTimeout;
 
 // ===== DOM要素の取得 =====
 const els = {
@@ -55,6 +68,12 @@ const els = {
   ratesAccordionContent: document.getElementById('rates-accordion-content'),
   ratesAccordionCard: document.querySelector('.card-rates'),
   ratesInputGrid: document.getElementById('rates-input-grid'),
+  
+  // 保存スロットDOM
+  slotSelect: document.getElementById('slot-select'),
+  slotNameInput: document.getElementById('slot-name-input'),
+  slotAddBtn: document.getElementById('slot-add-btn'),
+  slotDelBtn: document.getElementById('slot-del-btn'),
   
   // レート更新DOM
   fetchRatesBtn: document.getElementById('fetch-rates-btn'),
@@ -107,7 +126,10 @@ async function init() {
     state.rates[pair.code] = pair.defaultRate;
   });
 
-  // 多層復元ロジック：URLパラメータからの復元、またはLocalStorage自動保存から復元
+  // スロットのデフォルト初期状態の作成
+  slotsData.slots['slot-1'].state = JSON.parse(JSON.stringify(state));
+
+  // 多層復元ロジック：URLパラメータからの復元、またはLocalStorageスロット情報から復元
   const loadedFromUrl = loadStateFromUrl();
   if (!loadedFromUrl) {
     loadStateFromLocalStorage();
@@ -119,6 +141,9 @@ async function init() {
   
   // レート設定入力フォームの生成
   buildRatesInputs();
+  
+  // スロットセレクトの構築
+  buildSlotSelect();
   
   // ポジションテーブルの描画
   renderPositions();
@@ -251,12 +276,124 @@ function flashSaveStatus(message) {
   }
 }
 
-// メモリ機能：LocalStorageへの自動保存（最新状態の記憶）
+// スロットデータの再構築
+function buildSlotSelect() {
+  if (!els.slotSelect) return;
+  els.slotSelect.innerHTML = '';
+  
+  Object.keys(slotsData.slots).forEach(slotId => {
+    const opt = document.createElement('option');
+    opt.value = slotId;
+    opt.textContent = slotsData.slots[slotId].name;
+    els.slotSelect.appendChild(opt);
+  });
+  
+  els.slotSelect.value = slotsData.activeSlotId;
+  const currentSlot = slotsData.slots[slotsData.activeSlotId];
+  if (currentSlot && els.slotNameInput) {
+    els.slotNameInput.value = currentSlot.name;
+  }
+}
+
+// スロットの切り替え
+function switchSlot(slotId) {
+  if (!slotsData.slots[slotId]) return;
+  
+  // 現在のアクティブスロットに、現在の状態を一時バックアップ保存
+  if (slotsData.slots[slotsData.activeSlotId]) {
+    slotsData.slots[slotsData.activeSlotId].state = JSON.parse(JSON.stringify(state));
+  }
+  
+  // 新しいスロットに切り替え
+  slotsData.activeSlotId = slotId;
+  state = JSON.parse(JSON.stringify(slotsData.slots[slotId].state));
+  
+  // UIの同期
+  syncStateToUi();
+  buildSlotSelect();
+  updateDisplay();
+  
+  // LocalStorageに保存
+  saveStateToLocalStorage(false);
+  flashSaveStatus(`${slotsData.slots[slotId].name} をロードしました`);
+}
+
+// 新規スロットの追加（現在の設定を複製）
+function addSlot() {
+  const newId = 'slot-' + Date.now();
+  const slotCount = Object.keys(slotsData.slots).length + 1;
+  const newName = `口座スロット ${slotCount}`;
+  
+  // 現在の状態をコピーして追加
+  slotsData.slots[newId] = {
+    id: newId,
+    name: newName,
+    state: JSON.parse(JSON.stringify(state))
+  };
+  
+  switchSlot(newId);
+  flashSaveStatus('新しいスロットを追加しました');
+}
+
+// スロットの削除
+function deleteSlot() {
+  const slotIds = Object.keys(slotsData.slots);
+  if (slotIds.length <= 1) {
+    alert('これ以上保存スロットを削除できません。最低1つのスロットが必要です。');
+    return;
+  }
+  
+  const currentSlotName = slotsData.slots[slotsData.activeSlotId].name;
+  if (!confirm(`本当に「${currentSlotName}」を削除しますか？保存されていた口座情報やポジションは消去されます。`)) {
+    return;
+  }
+  
+  const targetId = slotsData.activeSlotId;
+  const nextActiveId = slotIds.find(id => id !== targetId);
+  
+  delete slotsData.slots[targetId];
+  
+  // 強制的に隣のスロットに切り替え
+  slotsData.activeSlotId = nextActiveId;
+  state = JSON.parse(JSON.stringify(slotsData.slots[nextActiveId].state));
+  
+  syncStateToUi();
+  buildSlotSelect();
+  updateDisplay();
+  
+  saveStateToLocalStorage(false);
+  flashSaveStatus('スロットを削除しました');
+}
+
+// スロット名のリアルタイム編集
+function updateSlotName(newName) {
+  if (!newName.trim()) return;
+  
+  const activeId = slotsData.activeSlotId;
+  if (slotsData.slots[activeId]) {
+    slotsData.slots[activeId].name = newName;
+    
+    // セレクトボックスのテキストのみ動的にアップデート（再構築を避けてフォーカス維持）
+    const opt = els.slotSelect.querySelector(`option[value="${activeId}"]`);
+    if (opt) {
+      opt.textContent = newName;
+    }
+    
+    saveStateToLocalStorage(false);
+  }
+}
+
+// メモリ機能：LocalStorageへの自動保存
 function saveStateToLocalStorage(showIndicator = false, statusMessage = '保存完了') {
   if (!isLocalStorageAvailable()) return;
   
-  // 自動保存用キー 'fx_margin_calc_autosave'
-  localStorage.setItem('fx_margin_calc_autosave', JSON.stringify(state));
+  // 現在のアクティブなスロットにstateをコピー
+  if (slotsData.slots[slotsData.activeSlotId]) {
+    slotsData.slots[slotsData.activeSlotId].state = JSON.parse(JSON.stringify(state));
+  }
+  
+  // スロットデータ全体を保存
+  localStorage.setItem('fx_margin_calc_slots_data', JSON.stringify(slotsData));
   
   if (showIndicator) {
     flashSaveStatus(statusMessage);
@@ -267,27 +404,34 @@ function saveStateToLocalStorage(showIndicator = false, statusMessage = '保存�
 function loadStateFromLocalStorage() {
   if (!isLocalStorageAvailable()) return false;
   
-  const saved = localStorage.getItem('fx_margin_calc_autosave');
+  const saved = localStorage.getItem('fx_margin_calc_slots_data');
   if (saved) {
     try {
       const parsed = JSON.parse(saved);
-      mergeStateData(parsed);
-      syncStateToUi();
-      return true;
+      if (parsed.activeSlotId && parsed.slots) {
+        slotsData = parsed;
+        
+        // アクティブなスロットの状態をstateにマージして同期
+        const activeSlot = slotsData.slots[slotsData.activeSlotId];
+        if (activeSlot && activeSlot.state) {
+          state = JSON.parse(JSON.stringify(activeSlot.state));
+          syncStateToUi();
+          return true;
+        }
+      }
     } catch (e) {
-      console.error('LocalStorage自動復元に失敗しました:', e);
+      console.error('LocalStorage復元に失敗しました:', e);
     }
   }
   return false;
 }
 
-// 手動メモリ操作 (M+)
+// 手動メモリ操作 (M+) - スロットとは別の一時バックアップ用
 function manualSaveState() {
   if (!isLocalStorageAvailable()) {
-    alert('このブラウザ環境ではメモリ保存機能が使用できません（file:// スキーム起動時のセキュリティ制限など）。');
+    alert('このブラウザ環境では手動メモリ保存機能が使用できません。');
     return;
   }
-  // 手動メモリ用キー 'fx_margin_calc_memory'
   localStorage.setItem('fx_margin_calc_memory', JSON.stringify(state));
   flashSaveStatus('メモリ保存完了 (M+)');
 }
@@ -300,11 +444,10 @@ function manualLoadState() {
   if (saved) {
     try {
       const parsed = JSON.parse(saved);
-      mergeStateData(parsed);
+      state = parsed;
       syncStateToUi();
       updateDisplay();
       
-      // 自動保存側にも同期させて状態を維持
       saveStateToLocalStorage(false);
       flashSaveStatus('メモリ読込完了 (MR)');
     } catch (e) {
@@ -322,7 +465,7 @@ function manualClearState() {
   flashSaveStatus('メモリ消去完了 (MC)');
 }
 
-// URLパラメータからの復元
+// URLパラメータからの復元（他の人からのデータ読込時）
 function loadStateFromUrl() {
   const params = new URLSearchParams(window.location.search);
   const dataParam = params.get('data');
@@ -332,15 +475,35 @@ function loadStateFromUrl() {
       const decodedData = decodeURIComponent(escape(atob(dataParam)));
       const parsed = JSON.parse(decodedData);
       
-      mergeStateData(parsed);
+      let incomingName = '共有された口座データ';
+      let incomingState = null;
+      
+      // パラメータがスロット名を含んだオブジェクトか、直接状態オブジェクトかチェック
+      if (parsed.name && parsed.state) {
+        incomingName = parsed.name;
+        incomingState = parsed.state;
+      } else {
+        incomingState = parsed;
+      }
+      
+      // 新しいスロットを生成してそこに取り込む（既存のスロットを壊さないためのWOW設計）
+      const newId = 'slot-shared-' + Date.now();
+      slotsData.slots[newId] = {
+        id: newId,
+        name: incomingName,
+        state: incomingState
+      };
+      slotsData.activeSlotId = newId;
+      state = JSON.parse(JSON.stringify(incomingState));
+      
       syncStateToUi();
       
       // URLのパラメータを消してクリーンにする
       const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
       window.history.replaceState(null, '', cleanUrl);
       
-      // 復元されたデータを即座にローカルに自動保存
-      saveStateToLocalStorage(true, '共有URLから数値を読込');
+      // 復元されたデータを即座にローカルスロットとして自動保存
+      saveStateToLocalStorage(true, '共有スロットを追加しました');
       return true;
     } catch (e) {
       console.error('URLデータパラメータの復元に失敗しました:', e);
@@ -349,23 +512,18 @@ function loadStateFromUrl() {
   return false;
 }
 
-// stateオブジェクトへのマージ処理
-function mergeStateData(parsed) {
-  if (parsed.accountBalance !== undefined) state.accountBalance = parsed.accountBalance;
-  if (parsed.leverage !== undefined) state.leverage = parsed.leverage;
-  if (parsed.lotSize !== undefined) state.lotSize = parsed.lotSize;
-  if (parsed.losscutThreshold !== undefined) state.losscutThreshold = parsed.losscutThreshold;
-  
-  if (parsed.positions) state.positions = parsed.positions;
-  if (parsed.newOrder) state.newOrder = { ...state.newOrder, ...parsed.newOrder };
-  if (parsed.rates) state.rates = { ...state.rates, ...parsed.rates };
-  if (parsed.swapSim) state.swapSim = { ...state.swapSim, ...parsed.swapSim };
-}
-
 // 共有URLを生成してクリップボードにコピー
 function generateShareUrl() {
   try {
-    const rawString = JSON.stringify(state);
+    const activeSlot = slotsData.slots[slotsData.activeSlotId];
+    
+    // スロット名とstate状態をカプセル化して共有
+    const shareObject = {
+      name: activeSlot ? activeSlot.name : '共有された口座データ',
+      state: state
+    };
+    
+    const rawString = JSON.stringify(shareObject);
     const base64Str = btoa(unescape(encodeURIComponent(rawString)));
     
     const shareUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?data=' + base64Str;
@@ -704,7 +862,7 @@ function removePosition(id) {
   updateDisplay();
 }
 
-// 通貨ペアの円換算レートの解決
+// 通学ペアの円換算レートの解決
 function getJpyConversionRate(pairCode, currentRateValue) {
   const pair = CURRENCY_PAIRS.find(p => p.code === pairCode);
   if (!pair) return 0;
@@ -1105,6 +1263,30 @@ function updateSafetyIndicator(ratio, margin) {
 
 // ===== イベントリスナー設定 =====
 function registerEventListeners() {
+  // 保存スロット切り替え
+  if (els.slotSelect) {
+    els.slotSelect.addEventListener('change', (e) => {
+      switchSlot(e.target.value);
+    });
+  }
+  
+  // スロット名変更
+  if (els.slotNameInput) {
+    els.slotNameInput.addEventListener('input', (e) => {
+      updateSlotName(e.target.value);
+    });
+  }
+  
+  // 新規スロット追加
+  if (els.slotAddBtn) {
+    els.slotAddBtn.addEventListener('click', addSlot);
+  }
+  
+  // 現在のスロット削除
+  if (els.slotDelBtn) {
+    els.slotDelBtn.addEventListener('click', deleteSlot);
+  }
+
   // 口座残高フォーマット＆変更適用
   setupCommaFormatting(els.accountBalance, (val) => {
     state.accountBalance = val;

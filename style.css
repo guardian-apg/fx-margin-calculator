@@ -924,3 +924,18 @@ body {
 .btn-memory:active {
   transform: scale(0.95);
 }
+
+/* ===== スロット制御レイアウト ===== */
+@media (max-width: 640px) {
+  .slot-control-group {
+    flex-wrap: wrap;
+  }
+  .slot-control-group select,
+  .slot-control-group input {
+    flex: 1 1 calc(50% - 4px) !important;
+  }
+  .slot-control-group button {
+    flex: 1 1 calc(50% - 4px) !important;
+    height: 38px;
+  }
+}
