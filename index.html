@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FX証拠金維持率シミュレーター</title>
+  <meta name="description" content="FXの現在保有ポジションと新規注文予定のポジションから、証拠金維持率やロスカットラインをリアルタイムに計算・シミュレーションするツールです。">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- ===== ヘッダー ===== -->
+  <header class="header">
+    <div class="header-container">
+      <div class="logo">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="logo-icon">
+          <line x1="12" y1="1" x2="12" y2="23"></line>
+          <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+        </svg>
+        <span class="logo-text">FX Margin Calculator</span>
+      </div>
+      <div class="header-status">
+        <span class="status-indicator"></span>
+        <span class="status-text">リアルタイムシミュレーション中</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ===== メインコンテンツ ===== -->
+  <main class="main-container">
+    <div class="layout-grid">
+      <!-- 左カラム：入力・設定エリア -->
+      <div class="input-column">
+        <!-- 1. 口座基本情報カード -->
+        <section class="card card-account animate-fade-in">
+          <div class="card-header">
+            <h2 class="card-title">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="card-header-icon">
+                <rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect>
+                <line x1="12" y1="10" x2="12" y2="10"></line>
+                <line x1="12" y1="14" x2="12" y2="14"></line>
+                <line x1="16" y1="10" x2="16" y2="10"></line>
+                <line x1="16" y1="14" x2="16" y2="14"></line>
+                <line x1="8" y1="10" x2="8" y2="10"></line>
+                <line x1="8" y1="14" x2="8" y2="14"></line>
+              </svg>
+              口座基本設定
+            </h2>
+          </div>
+          <div class="form-group-grid">
+            <div class="form-group">
+              <label for="account-balance" class="form-label">口座残高 (円)</label>
+              <input type="number" id="account-balance" class="form-input" value="1000000" min="0" step="10000">
+            </div>
+            <div class="form-group">
+              <label for="leverage-select" class="form-label">レバレッジ設定</label>
+              <select id="leverage-select" class="form-select">
+                <option value="25" selected>25倍 (国内個人)</option>
+                <option value="20">20倍</option>
+                <option value="10">10倍</option>
+                <option value="5">5倍</option>
+                <option value="1">1倍</option>
+                <option value="custom">カスタム入力</option>
+              </select>
+              <input type="number" id="leverage-custom" class="form-input custom-input hidden" value="25" min="1" max="1000">
+            </div>
+            <div class="form-group">
+              <label for="lot-size-select" class="form-label">1ロットあたり通貨数</label>
+              <select id="lot-size-select" class="form-select">
+                <option value="10000" selected>10,000 通貨</option>
+                <option value="1000">1,000 通貨</option>
+                <option value="100000">100,000 通貨</option>
+                <option value="custom">カスタム入力</option>
+              </select>
+              <input type="number" id="lot-size-custom" class="form-input custom-input hidden" value="10000" min="1" step="1000">
+            </div>
+          </div>
+        </section>
+
+        <!-- 2. 保有ポジションカード -->
+        <section class="card card-positions animate-fade-in" style="animation-delay: 0.1s;">
+          <div class="card-header justify-between">
+            <h2 class="card-title">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="card-header-icon">
+                <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                <path d="M2 17l10 5 10-5"></path>
+                <path d="M2 12l10 5 10-5"></path>
+              </svg>
+              現在保有ポジション
+            </h2>
+            <button id="add-position-btn" class="btn-secondary btn-sm">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+              ポジション追加
+            </button>
+          </div>
+          <div class="table-responsive">
+            <table class="position-table">
+              <thead>
+                <tr>
+                  <th>通貨ペア</th>
+                  <th>売買</th>
+                  <th>ロット数</th>
+                  <th>評価損益 (円)</th>
+                  <th>スワップ損益 (円)</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="position-table-body">
+                <!-- JavaScriptで動的にポジション行が挿入されます -->
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- 3. 新規シミュレーション注文カード -->
+        <section class="card card-new-order animate-fade-in" style="animation-delay: 0.2s;">
+          <div class="card-header">
+            <h2 class="card-title">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="card-header-icon">
+                <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"></polyline>
+                <polyline points="16 7 22 7 22 13"></polyline>
+              </svg>
+              新規シミュレーション注文
+            </h2>
+          </div>
+          <div class="form-group-grid">
+            <div class="form-group">
+              <label for="new-pair" class="form-label">通貨ペア</label>
+              <select id="new-pair" class="form-select">
+                <!-- JavaScriptで通貨ペア一覧が生成されます -->
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">売買区分</label>
+              <div class="direction-toggle-group">
+                <input type="radio" id="new-direction-buy" name="new-direction" value="buy" checked class="hidden-radio">
+                <label for="new-direction-buy" class="toggle-label toggle-buy">買 (Buy)</label>
+                <input type="radio" id="new-direction-sell" name="new-direction" value="sell" class="hidden-radio">
+                <label for="new-direction-sell" class="toggle-label toggle-sell">売 (Sell)</label>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="new-lots" class="form-label">数量 (ロット数)</label>
+              <input type="number" id="new-lots" class="form-input" value="1.0" min="0.01" step="0.1">
+            </div>
+            <div class="form-group">
+              <label for="new-price" class="form-label">注文単価 (レート)</label>
+              <input type="number" id="new-price" class="form-input" value="150.00" min="0.001" step="0.01">
+            </div>
+          </div>
+        </section>
+
+        <!-- 4. 現在レート設定 (折りたたみ) -->
+        <section class="card card-rates animate-fade-in" style="animation-delay: 0.3s;">
+          <div class="card-header accordion-toggle" id="rates-accordion-toggle">
+            <h2 class="card-title">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="card-header-icon">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+              </svg>
+              主要通貨ペア現在レート設定
+            </h2>
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="accordion-arrow">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </div>
+          <div class="accordion-content hidden" id="rates-accordion-content">
+            <div class="rates-actions-bar">
+              <span class="rates-update-time" id="rates-update-time">レート最終更新: 未取得</span>
+              <button id="fetch-rates-btn" class="btn-secondary btn-sm">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon">
+                  <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
+                </svg>
+                レート更新
+              </button>
+            </div>
+            <p class="accordion-desc" style="margin-top: 10px;">現在ポジションの必要証拠金計算およびクロス通貨の円換算に使用するレートを設定します。手動で任意のレートに書き換えることも可能です。</p>
+            <div class="form-group-grid" id="rates-input-grid">
+              <!-- JavaScriptで主要ペアの入力フォームが生成されます -->
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- 右カラム：結果表示エリア -->
+      <div class="result-column">
+        <!-- 1. 維持率サマリーカード -->
+        <section class="card card-summary animate-fade-in" style="animation-delay: 0.15s;">
+          <div class="card-header">
+            <h2 class="card-title">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="card-header-icon">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="16" x2="12" y2="12"></line>
+                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+              </svg>
+              シミュレーション結果
+            </h2>
+          </div>
+          
+          <div class="gauge-container">
+            <svg class="gauge-svg" viewBox="0 0 120 120">
+              <circle class="gauge-bg" cx="60" cy="60" r="50"></circle>
+              <circle class="gauge-progress" id="sim-gauge-circle" cx="60" cy="60" r="50"></circle>
+            </svg>
+            <div class="gauge-inner">
+              <span class="gauge-label">想定維持率</span>
+              <span class="gauge-value" id="sim-ratio-text">0.00%</span>
+            </div>
+          </div>
+
+          <div class="summary-status-badge" id="safety-badge">
+            安全
+          </div>
+
+          <!-- 比較テーブル -->
+          <div class="comparison-grid">
+            <div class="comparison-item">
+              <div class="comparison-header">現在保有状況</div>
+              <div class="comparison-value" id="calc-ratio-text">0.00%</div>
+              <div class="comparison-detail">
+                <div>有効有高: <span id="calc-equity" class="font-mono">0</span>円</div>
+                <div>必要証拠金: <span id="calc-margin" class="font-mono">0</span>円</div>
+              </div>
+            </div>
+            <div class="comparison-arrow-wrapper">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="comparison-arrow">
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+                <polyline points="12 5 19 12 12 19"></polyline>
+              </svg>
+            </div>
+            <div class="comparison-item highlighted">
+              <div class="comparison-header">新規注文追加後</div>
+              <div class="comparison-value" id="sim-ratio">0.00%</div>
+              <div class="comparison-detail">
+                <div>想定有高: <span id="sim-equity" class="font-mono">0</span>円</div>
+                <div>想定証拠金: <span id="sim-margin" class="font-mono">0</span>円</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="change-indicator-wrapper">
+            維持率変化: <span id="ratio-change" class="font-mono">0.00%</span>
+          </div>
+        </section>
+
+        <!-- 2. ロスカットシミュレーションカード -->
+        <section class="card card-losscut animate-fade-in" style="animation-delay: 0.25s;">
+          <div class="card-header">
+            <h2 class="card-title">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="card-header-icon">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                <line x1="12" y1="9" x2="12" y2="13"></line>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+              </svg>
+              ロスカット・許容変動幅シミュレーション
+            </h2>
+          </div>
+          <div class="losscut-settings">
+            <label for="losscut-threshold" class="form-label-inline">ロスカット基準維持率:</label>
+            <select id="losscut-threshold" class="form-select form-select-sm">
+              <option value="100" selected>100%</option>
+              <option value="50">50%</option>
+              <option value="0">0% (残高ゼロ)</option>
+            </select>
+          </div>
+
+          <div class="sim-result-box">
+            <div class="sim-result-pair-row">
+              新規注文対象: <span id="sim-target-pair" class="font-mono">-</span>
+            </div>
+            
+            <div class="losscut-metrics-grid">
+              <div class="metric-card">
+                <span class="metric-label">ロスカットレート</span>
+                <span class="metric-value font-mono" id="losscut-rate">-</span>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">許容変動幅 (あと何円)</span>
+                <span class="metric-value font-mono" id="losscut-distance">-</span>
+              </div>
+            </div>
+            
+            <p class="sim-warning-text" id="sim-warning-desc">
+              ※計算値は保有中の他ポジションの評価損益が変動しない前提です。
+            </p>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <!-- ===== フッター ===== -->
+  <footer class="footer">
+    <div class="footer-container">
+      <p class="footer-text">&copy; 2026 FX Margin Calculator. All Rights Reserved.</p>
+      <p class="footer-warning">注意：本ツールの計算結果はシミュレーション値であり、実際の取引でのロスカット水準や利益・損失を保証するものではありません。各FX業者の算出仕様に準拠する形で十分な資金余裕を持って取引を行ってください。</p>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
