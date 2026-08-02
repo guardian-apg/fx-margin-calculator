@@ -818,3 +818,61 @@ body {
     margin: 4px 0;
   }
 }
+
+/* ===== スワップシミュレーター ===== */
+.swap-result-container {
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+}
+
+.swap-result-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.swap-result-item {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.swap-result-item.highlighted {
+  border-left: 2px solid var(--accent);
+  padding-left: 10px;
+}
+
+.swap-result-label {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.swap-result-amount-wrapper {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.swap-result-value {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.swap-result-unit {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 640px) {
+  .swap-result-grid {
+    grid-template-columns: 1fr;
+  }
+}

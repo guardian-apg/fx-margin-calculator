@@ -22,6 +22,7 @@
         <span class="logo-text">FX Margin Calculator</span>
       </div>
       <div class="header-status">
+        <span id="save-status-text" class="status-text hidden" style="margin-right: 8px; color: var(--success); opacity: 0.9; transition: opacity var(--transition);">保存完了</span>
         <span class="status-indicator"></span>
         <span class="status-text">リアルタイムシミュレーション中</span>
       </div>
@@ -155,8 +156,63 @@
           </div>
         </section>
 
-        <!-- 4. 現在レート設定 (折りたたみ) -->
-        <section class="card card-rates animate-fade-in" style="animation-delay: 0.3s;">
+        <!-- 4. 想定スワップシミュレーターカード -->
+        <section class="card card-swap-sim animate-fade-in" style="animation-delay: 0.3s;">
+          <div class="card-header">
+            <h2 class="card-title">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="card-header-icon">
+                <line x1="12" y1="1" x2="12" y2="23"></line>
+                <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+              </svg>
+              想定スワップシミュレーター
+            </h2>
+          </div>
+          <div class="form-group-grid" style="margin-bottom: 20px;">
+            <div class="form-group">
+              <label for="swap-sim-pair" class="form-label">通貨ペア</label>
+              <select id="swap-sim-pair" class="form-select">
+                <!-- JSで通貨ペア一覧を自動挿入 -->
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="swap-sim-lots" class="form-label">数量 (ロット数)</label>
+              <input type="number" id="swap-sim-lots" class="form-input" value="10.0" min="0.01" step="0.1">
+            </div>
+            <div class="form-group">
+              <label for="swap-sim-point" class="form-label">1日のスワップ値 (手動入力)</label>
+              <input type="number" id="swap-sim-point" class="form-input" value="28.0" min="0" step="1">
+              <span id="swap-sim-note" style="font-size: 0.72rem; color: var(--text-dim); margin-top: 2px;">※10万通貨あたりの掲載値を自動補正</span>
+            </div>
+          </div>
+          <div class="swap-result-container">
+            <div class="swap-result-grid">
+              <div class="swap-result-item">
+                <span class="swap-result-label">1日あたり</span>
+                <div class="swap-result-amount-wrapper">
+                  <span class="swap-result-value font-mono" id="swap-res-day">0</span>
+                  <span class="swap-result-unit">円</span>
+                </div>
+              </div>
+              <div class="swap-result-item">
+                <span class="swap-result-label">1ヶ月後 (30日)</span>
+                <div class="swap-result-amount-wrapper">
+                  <span class="swap-result-value font-mono" id="swap-res-month">0</span>
+                  <span class="swap-result-unit">円</span>
+                </div>
+              </div>
+              <div class="swap-result-item highlighted">
+                <span class="swap-result-label">1年後 (365日)</span>
+                <div class="swap-result-amount-wrapper">
+                  <span class="swap-result-value font-mono" id="swap-res-year">0</span>
+                  <span class="swap-result-unit">円</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 5. 現在レート設定 (折りたたみ) -->
+        <section class="card card-rates animate-fade-in" style="animation-delay: 0.4s;">
           <div class="card-header accordion-toggle" id="rates-accordion-toggle">
             <h2 class="card-title">
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="card-header-icon">

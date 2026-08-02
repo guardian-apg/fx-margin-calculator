@@ -29,7 +29,12 @@ let state = {
     lots: 1.0,
     price: 150.00
   },
-  losscutThreshold: 100
+  losscutThreshold: 100,
+  swapSim: {
+    pair: 'MXN/JPY',
+    lots: 10.0,
+    point: 280.0
+  }
 };
 
 // ===== DOM要素の取得 =====
@@ -52,6 +57,18 @@ const els = {
   // レート更新DOM
   fetchRatesBtn: document.getElementById('fetch-rates-btn'),
   ratesUpdateTime: document.getElementById('rates-update-time'),
+  
+  // 想定スワップシミュレーターDOM
+  swapSimPair: document.getElementById('swap-sim-pair'),
+  swapSimLots: document.getElementById('swap-sim-lots'),
+  swapSimPoint: document.getElementById('swap-sim-point'),
+  swapSimNote: document.getElementById('swap-sim-note'),
+  swapResDay: document.getElementById('swap-res-day'),
+  swapResMonth: document.getElementById('swap-res-month'),
+  swapResYear: document.getElementById('swap-res-year'),
+  
+  // 保存状態インジケーター
+  saveStatusText: document.getElementById('save-status-text'),
   
   // 計算結果DOM
   calcEquity: document.getElementById('calc-equity'),
@@ -79,8 +96,12 @@ async function init() {
     state.rates[pair.code] = pair.defaultRate;
   });
 
+  // メモリ機能：LocalStorageから前回状態を復元
+  loadStateFromLocalStorage();
+
   // 通貨ペア選択肢の生成
   buildPairSelectors();
+  buildSwapSimPairSelector();
   
   // レート設定入力フォームの生成
   buildRatesInputs();
@@ -91,7 +112,7 @@ async function init() {
   // イベントリスナー登録
   registerEventListeners();
   
-  // 初期計算
+  // 初期計算とスワップ計算
   updateDisplay();
   
   // リアルタイム為替レートの取得
@@ -99,6 +120,83 @@ async function init() {
 }
 
 // ===== 機能別の関数群 =====
+
+// メモリ機能：LocalStorageへの保存
+let saveTimeout;
+function saveStateToLocalStorage(showIndicator = false) {
+  localStorage.setItem('fx_margin_calc_state', JSON.stringify(state));
+  
+  if (showIndicator && els.saveStatusText) {
+    els.saveStatusText.classList.remove('hidden');
+    els.saveStatusText.style.opacity = '1';
+    
+    clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(() => {
+      els.saveStatusText.style.opacity = '0';
+      setTimeout(() => {
+        els.saveStatusText.classList.add('hidden');
+      }, 250);
+    }, 1000);
+  }
+}
+
+// メモリ機能：LocalStorageからの復元
+function loadStateFromLocalStorage() {
+  const saved = localStorage.getItem('fx_margin_calc_state');
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      
+      if (parsed.accountBalance !== undefined) state.accountBalance = parsed.accountBalance;
+      if (parsed.leverage !== undefined) state.leverage = parsed.leverage;
+      if (parsed.lotSize !== undefined) state.lotSize = parsed.lotSize;
+      if (parsed.losscutThreshold !== undefined) state.losscutThreshold = parsed.losscutThreshold;
+      
+      if (parsed.positions) state.positions = parsed.positions;
+      if (parsed.newOrder) state.newOrder = { ...state.newOrder, ...parsed.newOrder };
+      if (parsed.rates) state.rates = { ...state.rates, ...parsed.rates };
+      if (parsed.swapSim) state.swapSim = { ...state.swapSim, ...parsed.swapSim };
+      
+      // フォーム各値の復元
+      els.accountBalance.value = state.accountBalance;
+      
+      els.leverageSelect.value = [25, 20, 10, 5, 1].includes(state.leverage) ? state.leverage : 'custom';
+      if (els.leverageSelect.value === 'custom') {
+        els.leverageCustom.classList.remove('hidden');
+        els.leverageCustom.value = state.leverage;
+      } else {
+        els.leverageCustom.classList.add('hidden');
+      }
+      
+      els.lotSizeSelect.value = [10000, 1000, 100000].includes(state.lotSize) ? state.lotSize : 'custom';
+      if (els.lotSizeSelect.value === 'custom') {
+        els.lotSizeCustom.classList.remove('hidden');
+        els.lotSizeCustom.value = state.lotSize;
+      } else {
+        els.lotSizeCustom.classList.add('hidden');
+      }
+      
+      els.newPair.value = state.newOrder.pair;
+      els.newLots.value = state.newOrder.lots;
+      els.newPrice.value = state.newOrder.price;
+      if (state.newOrder.direction === 'buy') {
+        document.getElementById('new-direction-buy').checked = true;
+      } else {
+        document.getElementById('new-direction-sell').checked = true;
+      }
+      
+      els.losscutThreshold.value = state.losscutThreshold;
+      
+      if (els.swapSimPair) {
+        els.swapSimPair.value = state.swapSim.pair;
+        els.swapSimLots.value = state.swapSim.lots;
+        els.swapSimPoint.value = state.swapSim.point;
+      }
+    } catch (e) {
+      console.error('LocalStorage復元に失敗しました:', e);
+    }
+  }
+}
 
 // リアルタイム為替レートの取得 (API接続)
 async function fetchRealtimeRates() {
@@ -114,7 +212,6 @@ async function fetchRealtimeRates() {
   }
 
   try {
-    // ExchangeRate-API (無料・CORS対応) を使用
     const response = await fetch('https://open.er-api.com/v6/latest/USD');
     if (!response.ok) throw new Error('レート取得リクエストエラー');
     const data = await response.json();
@@ -125,7 +222,6 @@ async function fetchRealtimeRates() {
       CURRENCY_PAIRS.forEach(pair => {
         let rate = pair.defaultRate;
         
-        // 各通貨ペアの対円/対ドルレートを算出
         if (pair.code === 'USD/JPY') {
           rate = usdRates.JPY;
         } else if (pair.code === 'EUR/JPY') {
@@ -153,8 +249,6 @@ async function fetchRealtimeRates() {
         }
         
         if (rate && !isNaN(rate)) {
-          // pipsサイズに応じた精度で丸める
-          // 対円は小数点以下3桁、ドルストレートは4桁
           const decimals = pair.pipSize === 0.01 ? 3 : 4;
           state.rates[pair.code] = parseFloat(rate.toFixed(decimals));
         }
@@ -178,6 +272,9 @@ async function fetchRealtimeRates() {
       if (updateTimeEl) {
         updateTimeEl.textContent = `レート最終更新: ${timeStr}`;
       }
+      
+      // メモリへ保存
+      saveStateToLocalStorage(false);
     }
   } catch (error) {
     console.error('リアルタイム為替レートの取得に失敗しました:', error);
@@ -210,7 +307,20 @@ function buildPairSelectors() {
   
   // 初期値の同期
   els.newPair.value = state.newOrder.pair;
-  els.newPrice.value = state.rates[state.newOrder.pair];
+  els.newPrice.value = state.newOrder.price;
+}
+
+// 想定スワップ通貨ペア選択肢の生成
+function buildSwapSimPairSelector() {
+  if (!els.swapSimPair) return;
+  els.swapSimPair.innerHTML = '';
+  CURRENCY_PAIRS.forEach(pair => {
+    const opt = document.createElement('option');
+    opt.value = pair.code;
+    opt.textContent = `${pair.code} (${pair.name})`;
+    els.swapSimPair.appendChild(opt);
+  });
+  els.swapSimPair.value = state.swapSim.pair;
 }
 
 // レート入力フォームの生成
@@ -237,12 +347,12 @@ function buildRatesInputs() {
       const val = parseFloat(e.target.value);
       if (!isNaN(val) && val > 0) {
         state.rates[pair.code] = val;
-        // 新規注文単価が現在ペアと同じなら同期する
         if (state.newOrder.pair === pair.code) {
           state.newOrder.price = val;
           els.newPrice.value = val;
         }
         updateDisplay();
+        saveStateToLocalStorage(true);
       }
     });
     
@@ -286,6 +396,7 @@ function renderPositions() {
     selectPair.addEventListener('change', (e) => {
       pos.pair = e.target.value;
       updateDisplay();
+      saveStateToLocalStorage(true);
     });
     tdPair.appendChild(selectPair);
     
@@ -307,6 +418,7 @@ function renderPositions() {
     selectDir.addEventListener('change', (e) => {
       pos.direction = e.target.value;
       updateDisplay();
+      saveStateToLocalStorage(true);
     });
     tdDir.appendChild(selectDir);
     
@@ -323,6 +435,7 @@ function renderPositions() {
       if (!isNaN(val) && val >= 0) {
         pos.lots = val;
         updateDisplay();
+        saveStateToLocalStorage(true);
       }
     });
     tdLots.appendChild(inputLots);
@@ -339,6 +452,7 @@ function renderPositions() {
       if (!isNaN(val)) {
         pos.profit = val;
         updateDisplay();
+        saveStateToLocalStorage(true);
       }
     });
     tdProfit.appendChild(inputProfit);
@@ -355,6 +469,7 @@ function renderPositions() {
       if (!isNaN(val)) {
         pos.swap = val;
         updateDisplay();
+        saveStateToLocalStorage(true);
       }
     });
     tdSwap.appendChild(inputSwap);
@@ -373,6 +488,7 @@ function renderPositions() {
     `;
     btnDel.addEventListener('click', () => {
       removePosition(pos.id);
+      saveStateToLocalStorage(true);
     });
     tdAction.appendChild(btnDel);
     
@@ -417,7 +533,6 @@ function getJpyConversionRate(pairCode, currentRateValue) {
   if (pair.type === 'jpy') {
     return currentRateValue; // 直接対円
   } else if (pair.type === 'usd') {
-    // 決済通貨がUSDのため、米ドル/円(USD/JPY)のレートを掛けることで対円レートを算出
     const usdjpyRate = state.rates['USD/JPY'] || 150.00;
     return currentRateValue * usdjpyRate;
   }
@@ -429,7 +544,6 @@ function calculateMargins() {
   const leverage = state.leverage;
   const lotSize = state.lotSize;
   
-  // 1. 現在のポジション集計
   let currentTotalMargin = 0;
   let totalProfit = 0;
   let totalSwap = 0;
@@ -438,7 +552,6 @@ function calculateMargins() {
     const currentRate = state.rates[pos.pair] || 0;
     const jpyRate = getJpyConversionRate(pos.pair, currentRate);
     
-    // 必要証拠金 = 取引金額 (ロット数 * 1ロット通貨数 * 円換算レート) / レバレッジ
     const margin = (pos.lots * lotSize * jpyRate) / leverage;
     currentTotalMargin += margin;
     
@@ -446,27 +559,19 @@ function calculateMargins() {
     totalSwap += pos.swap;
   });
   
-  // 現在の有効有高 = 口座残高 + 評価損益 + スワップ
   const currentEquity = state.accountBalance + totalProfit + totalSwap;
   
-  // 現在の証拠金維持率
   let currentRatio = 0;
   if (currentTotalMargin > 0) {
     currentRatio = (currentEquity / currentTotalMargin) * 100;
   }
   
-  // 2. 新規シミュレーション注文の計算
-  const newPairObj = CURRENCY_PAIRS.find(p => p.code === state.newOrder.pair);
   const newPriceJpy = getJpyConversionRate(state.newOrder.pair, state.newOrder.price);
   const newOrderMargin = (state.newOrder.lots * lotSize * newPriceJpy) / leverage;
   
-  // 想定必要証拠金 = 現在の必要証拠金 + 新規注文の必要証拠金
   const simTotalMargin = currentTotalMargin + newOrderMargin;
-  
-  // 想定有効有高（新規注文時の含み損益は最初は0と想定）
   const simEquity = currentEquity;
   
-  // 想定証拠金維持率
   let simRatio = 0;
   if (simTotalMargin > 0) {
     simRatio = (simEquity / simTotalMargin) * 100;
@@ -494,7 +599,6 @@ function calculateLosscutRate(metrics) {
   
   let netLots = 0;
   
-  // 現在ポジションの集計
   state.positions.forEach(pos => {
     if (pos.pair === targetPairCode) {
       if (pos.direction === 'buy') {
@@ -505,14 +609,12 @@ function calculateLosscutRate(metrics) {
     }
   });
   
-  // 新規ポジションの加算
   if (state.newOrder.direction === 'buy') {
     netLots += state.newOrder.lots;
   } else {
     netLots -= state.newOrder.lots;
   }
   
-  // ネットロットが0の場合は両建て状態
   if (Math.abs(netLots) < 0.0001) {
     return {
       type: 'hedged',
@@ -520,14 +622,10 @@ function calculateLosscutRate(metrics) {
     };
   }
   
-  // ロスカット発生基準額 (必要証拠金 * 基準維持率)
   const losscutThresholdRatio = state.losscutThreshold / 100;
   const targetEquityLc = metrics.simTotalMargin * losscutThresholdRatio;
-  
-  // 許容される損失額
   const allowLoss = metrics.simEquity - targetEquityLc;
   
-  // 既にロスカット基準を下回っている場合
   if (allowLoss < 0) {
     return {
       type: 'already_liquidated',
@@ -556,6 +654,38 @@ function calculateLosscutRate(metrics) {
     distance: distance,
     pips: pips
   };
+}
+
+// 想定スワップシミュレーションの計算
+function calculateSwapSimulation() {
+  if (!els.swapSimPair) return;
+  
+  const pairCode = state.swapSim.pair;
+  const lots = state.swapSim.lots;
+  const point = state.swapSim.point;
+  
+  // ルールに基づく単位自動補正判定：MXN/JPYとZAR/JPYは10万通貨表記のため10で除算
+  let isCorrected = false;
+  let noteText = '※1ロット（1万通貨）あたりのスワップ値を入力';
+  
+  if (pairCode === 'MXN/JPY' || pairCode === 'ZAR/JPY') {
+    isCorrected = true;
+    noteText = '※10万通貨の掲載値を自動で 1/10 補正（1万通貨あたり）';
+  }
+  
+  els.swapSimNote.textContent = noteText;
+  
+  // 1ロット（1万通貨）あたりに正規化したスワップ値
+  const pointNormalized = isCorrected ? (point / 10) : point;
+  
+  // 各期間の想定スワップ金額（円）
+  const dailyAmount = lots * pointNormalized;
+  const monthlyAmount = dailyAmount * 30;
+  const yearlyAmount = dailyAmount * 365;
+  
+  els.swapResDay.textContent = Math.round(dailyAmount).toLocaleString();
+  els.swapResMonth.textContent = Math.round(monthlyAmount).toLocaleString();
+  els.swapResYear.textContent = Math.round(yearlyAmount).toLocaleString();
 }
 
 // 画面全体の表示更新
@@ -615,6 +745,9 @@ function updateDisplay() {
     els.losscutRate.textContent = lcInfo.losscutRate.toFixed(decimals);
     els.losscutDistance.textContent = `${lcInfo.distance.toFixed(decimals)}${unit} (${lcInfo.pips.toFixed(1)} pips)`;
   }
+  
+  // スワップシミュレーション計算
+  calculateSwapSimulation();
 }
 
 // ゲージ描画の更新
@@ -667,6 +800,7 @@ function registerEventListeners() {
     if (!isNaN(val) && val >= 0) {
       state.accountBalance = val;
       updateDisplay();
+      saveStateToLocalStorage(true);
     }
   });
   
@@ -680,6 +814,7 @@ function registerEventListeners() {
       state.leverage = parseFloat(e.target.value);
     }
     updateDisplay();
+    saveStateToLocalStorage(true);
   });
   
   els.leverageCustom.addEventListener('input', (e) => {
@@ -687,6 +822,7 @@ function registerEventListeners() {
     if (!isNaN(val) && val > 0) {
       state.leverage = val;
       updateDisplay();
+      saveStateToLocalStorage(true);
     }
   });
   
@@ -700,6 +836,7 @@ function registerEventListeners() {
       state.lotSize = parseFloat(e.target.value);
     }
     updateDisplay();
+    saveStateToLocalStorage(true);
   });
   
   els.lotSizeCustom.addEventListener('input', (e) => {
@@ -707,23 +844,27 @@ function registerEventListeners() {
     if (!isNaN(val) && val > 0) {
       state.lotSize = val;
       updateDisplay();
+      saveStateToLocalStorage(true);
     }
   });
   
   // ポジション追加ボタン
-  els.addPositionBtn.addEventListener('click', addPosition);
+  els.addPositionBtn.addEventListener('click', () => {
+    addPosition();
+    saveStateToLocalStorage(true);
+  });
   
   // 新規シミュレーション通貨ペア変更
   els.newPair.addEventListener('change', (e) => {
     const code = e.target.value;
     state.newOrder.pair = code;
     
-    // 設定されている現在レートに同期
     const currentPrice = state.rates[code] || 0;
     state.newOrder.price = currentPrice;
     els.newPrice.value = currentPrice;
     
     updateDisplay();
+    saveStateToLocalStorage(true);
   });
   
   // 新規シミュレーション売買方向変更
@@ -731,6 +872,7 @@ function registerEventListeners() {
     radio.addEventListener('change', (e) => {
       state.newOrder.direction = e.target.value;
       updateDisplay();
+      saveStateToLocalStorage(true);
     });
   });
   
@@ -740,6 +882,7 @@ function registerEventListeners() {
     if (!isNaN(val) && val >= 0) {
       state.newOrder.lots = val;
       updateDisplay();
+      saveStateToLocalStorage(true);
     }
   });
   
@@ -749,6 +892,7 @@ function registerEventListeners() {
     if (!isNaN(val) && val >= 0) {
       state.newOrder.price = val;
       updateDisplay();
+      saveStateToLocalStorage(true);
     }
   });
   
@@ -756,6 +900,7 @@ function registerEventListeners() {
   els.losscutThreshold.addEventListener('change', (e) => {
     state.losscutThreshold = parseFloat(e.target.value);
     updateDisplay();
+    saveStateToLocalStorage(true);
   });
   
   // レート設定アコーディオンの開閉
@@ -773,6 +918,45 @@ function registerEventListeners() {
   // リアルタイムレート手動更新ボタン
   if (els.fetchRatesBtn) {
     els.fetchRatesBtn.addEventListener('click', fetchRealtimeRates);
+  }
+  
+  // 想定スワップシミュレーターペア変更
+  if (els.swapSimPair) {
+    els.swapSimPair.addEventListener('change', (e) => {
+      state.swapSim.pair = e.target.value;
+      // 適切な初期スワップ値をセット (MXN/JPY, ZAR/JPYは10万通貨あたり想定値、他は1万通貨あたり想定値)
+      if (e.target.value === 'MXN/JPY' || e.target.value === 'ZAR/JPY') {
+        state.swapSim.point = 280.0;
+      } else if (e.target.value === 'TRY/JPY') {
+        state.swapSim.point = 1500.0;
+      } else {
+        state.swapSim.point = 230.0;
+      }
+      els.swapSimPoint.value = state.swapSim.point;
+      
+      updateDisplay();
+      saveStateToLocalStorage(true);
+    });
+    
+    // 想定スワップロット数変更
+    els.swapSimLots.addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value);
+      if (!isNaN(val) && val >= 0) {
+        state.swapSim.lots = val;
+        updateDisplay();
+        saveStateToLocalStorage(true);
+      }
+    });
+    
+    // 想定スワップポイント（手動入力値）変更
+    els.swapSimPoint.addEventListener('input', (e) => {
+      const val = parseFloat(e.target.value);
+      if (!isNaN(val) && val >= 0) {
+        state.swapSim.point = val;
+        updateDisplay();
+        saveStateToLocalStorage(true);
+      }
+    });
   }
 }
 
