@@ -890,3 +890,37 @@ body {
   position: relative;
   width: 100%;
 }
+
+/* ===== メモリ制御ボタン (M+, MR, MC) ===== */
+.memory-controls {
+  display: flex;
+  background-color: var(--bg-input);
+  border: 1px solid var(--border);
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  gap: 2px;
+}
+
+.btn-memory {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all var(--transition);
+  min-width: 32px;
+}
+
+.btn-memory:hover {
+  background-color: var(--bg-card);
+  color: var(--accent);
+  box-shadow: var(--shadow-sm);
+}
+
+.btn-memory:active {
+  transform: scale(0.95);
+}

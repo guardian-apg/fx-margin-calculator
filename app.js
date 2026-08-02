@@ -72,6 +72,15 @@ const els = {
   // 保存状態インジケーター
   saveStatusText: document.getElementById('save-status-text'),
   
+  // 手動メモリボタンDOM
+  memSaveBtn: document.getElementById('mem-save-btn'),
+  memLoadBtn: document.getElementById('mem-load-btn'),
+  memClearBtn: document.getElementById('mem-clear-btn'),
+  
+  // 共有URLボタンDOM
+  shareUrlBtn: document.getElementById('share-url-btn'),
+  shareStatusText: document.getElementById('share-status-text'),
+  
   // 計算結果DOM
   calcEquity: document.getElementById('calc-equity'),
   calcMargin: document.getElementById('calc-margin'),
@@ -98,8 +107,11 @@ async function init() {
     state.rates[pair.code] = pair.defaultRate;
   });
 
-  // メモリ機能：LocalStorageから前回状態を復元
-  loadStateFromLocalStorage();
+  // 多層復元ロジック：URLパラメータからの復元、またはLocalStorage自動保存から復元
+  const loadedFromUrl = loadStateFromUrl();
+  if (!loadedFromUrl) {
+    loadStateFromLocalStorage();
+  }
 
   // 通貨ペア選択肢の生成
   buildPairSelectors();
@@ -144,24 +156,20 @@ function formatNumberWithCommas(num) {
 
 // テキスト入力欄への双方向カンマフォーマット適用ヘルパー
 function setupCommaFormatting(inputEl, valueUpdateCallback) {
-  // 初期表示のフォーマット
   const initialRawVal = parseFormattedNumber(inputEl.value);
   inputEl.value = formatNumberWithCommas(initialRawVal);
 
-  // フォーカス時にカンマを除去して数値入力可能にする
   inputEl.addEventListener('focus', (e) => {
     const rawVal = parseFormattedNumber(e.target.value);
     e.target.value = rawVal === 0 ? '' : rawVal;
   });
 
-  // フォーカスアウト（確定）時にカンマを再適用し、状態を確定
   inputEl.addEventListener('blur', (e) => {
     const rawVal = parseFormattedNumber(e.target.value);
     e.target.value = formatNumberWithCommas(rawVal);
     valueUpdateCallback(rawVal);
   });
 
-  // 入力中に即時反映
   inputEl.addEventListener('input', (e) => {
     const rawVal = parseFormattedNumber(e.target.value);
     valueUpdateCallback(rawVal);
@@ -170,12 +178,66 @@ function setupCommaFormatting(inputEl, valueUpdateCallback) {
 
 // ===== 機能別の関数群 =====
 
-// メモリ機能：LocalStorageへの保存
-let saveTimeout;
-function saveStateToLocalStorage(showIndicator = false) {
-  localStorage.setItem('fx_margin_calc_state', JSON.stringify(state));
+// LocalStorageが利用可能か判定（file://スキーム対策）
+function isLocalStorageAvailable() {
+  try {
+    const storage = window.localStorage;
+    const x = '__storage_test__';
+    storage.setItem(x, x);
+    storage.removeItem(x);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// 状態オブジェクトのUIフォーム同期
+function syncStateToUi() {
+  els.accountBalance.value = formatNumberWithCommas(state.accountBalance);
   
-  if (showIndicator && els.saveStatusText) {
+  els.leverageSelect.value = [25, 20, 10, 5, 1].includes(state.leverage) ? state.leverage : 'custom';
+  if (els.leverageSelect.value === 'custom') {
+    els.leverageCustom.classList.remove('hidden');
+    els.leverageCustom.value = state.leverage;
+  } else {
+    els.leverageCustom.classList.add('hidden');
+  }
+  
+  els.lotSizeSelect.value = [10000, 1000, 100000].includes(state.lotSize) ? state.lotSize : 'custom';
+  if (els.lotSizeSelect.value === 'custom') {
+    els.lotSizeCustom.classList.remove('hidden');
+    els.lotSizeCustom.value = state.lotSize;
+  } else {
+    els.lotSizeCustom.classList.add('hidden');
+  }
+  
+  els.newPair.value = state.newOrder.pair;
+  els.newLots.value = state.newOrder.lots;
+  els.newPrice.value = state.newOrder.price;
+  if (state.newOrder.direction === 'buy') {
+    document.getElementById('new-direction-buy').checked = true;
+  } else {
+    document.getElementById('new-direction-sell').checked = true;
+  }
+  
+  els.losscutThreshold.value = state.losscutThreshold;
+  
+  if (els.swapSimPair) {
+    els.swapSimPair.value = state.swapSim.pair;
+    els.swapSimLots.value = state.swapSim.lots;
+    els.swapSimPoint.value = state.swapSim.point;
+  }
+
+  // 設定レート入力欄の再構築と値同期
+  buildRatesInputs();
+  // ポジションテーブルの再構築
+  renderPositions();
+}
+
+// メモリ表示の一時フラッシュ
+function flashSaveStatus(message) {
+  if (els.saveStatusText) {
+    els.saveStatusText.textContent = message;
     els.saveStatusText.classList.remove('hidden');
     els.saveStatusText.style.opacity = '1';
     
@@ -185,65 +247,145 @@ function saveStateToLocalStorage(showIndicator = false) {
       setTimeout(() => {
         els.saveStatusText.classList.add('hidden');
       }, 250);
-    }, 1000);
+    }, 1200);
   }
 }
 
-// メモリ機能：LocalStorageからの復元
+// メモリ機能：LocalStorageへの自動保存（最新状態の記憶）
+function saveStateToLocalStorage(showIndicator = false, statusMessage = '保存完了') {
+  if (!isLocalStorageAvailable()) return;
+  
+  // 自動保存用キー 'fx_margin_calc_autosave'
+  localStorage.setItem('fx_margin_calc_autosave', JSON.stringify(state));
+  
+  if (showIndicator) {
+    flashSaveStatus(statusMessage);
+  }
+}
+
+// メモリ機能：LocalStorageからの自動保存復元
 function loadStateFromLocalStorage() {
-  const saved = localStorage.getItem('fx_margin_calc_state');
+  if (!isLocalStorageAvailable()) return false;
+  
+  const saved = localStorage.getItem('fx_margin_calc_autosave');
   if (saved) {
     try {
       const parsed = JSON.parse(saved);
-      
-      if (parsed.accountBalance !== undefined) state.accountBalance = parsed.accountBalance;
-      if (parsed.leverage !== undefined) state.leverage = parsed.leverage;
-      if (parsed.lotSize !== undefined) state.lotSize = parsed.lotSize;
-      if (parsed.losscutThreshold !== undefined) state.losscutThreshold = parsed.losscutThreshold;
-      
-      if (parsed.positions) state.positions = parsed.positions;
-      if (parsed.newOrder) state.newOrder = { ...state.newOrder, ...parsed.newOrder };
-      if (parsed.rates) state.rates = { ...state.rates, ...parsed.rates };
-      if (parsed.swapSim) state.swapSim = { ...state.swapSim, ...parsed.swapSim };
-      
-      // フォーム各値の復元（口座残高はカンマフォーマット）
-      els.accountBalance.value = formatNumberWithCommas(state.accountBalance);
-      
-      els.leverageSelect.value = [25, 20, 10, 5, 1].includes(state.leverage) ? state.leverage : 'custom';
-      if (els.leverageSelect.value === 'custom') {
-        els.leverageCustom.classList.remove('hidden');
-        els.leverageCustom.value = state.leverage;
-      } else {
-        els.leverageCustom.classList.add('hidden');
-      }
-      
-      els.lotSizeSelect.value = [10000, 1000, 100000].includes(state.lotSize) ? state.lotSize : 'custom';
-      if (els.lotSizeSelect.value === 'custom') {
-        els.lotSizeCustom.classList.remove('hidden');
-        els.lotSizeCustom.value = state.lotSize;
-      } else {
-        els.lotSizeCustom.classList.add('hidden');
-      }
-      
-      els.newPair.value = state.newOrder.pair;
-      els.newLots.value = state.newOrder.lots;
-      els.newPrice.value = state.newOrder.price;
-      if (state.newOrder.direction === 'buy') {
-        document.getElementById('new-direction-buy').checked = true;
-      } else {
-        document.getElementById('new-direction-sell').checked = true;
-      }
-      
-      els.losscutThreshold.value = state.losscutThreshold;
-      
-      if (els.swapSimPair) {
-        els.swapSimPair.value = state.swapSim.pair;
-        els.swapSimLots.value = state.swapSim.lots;
-        els.swapSimPoint.value = state.swapSim.point;
-      }
+      mergeStateData(parsed);
+      syncStateToUi();
+      return true;
     } catch (e) {
-      console.error('LocalStorage復元に失敗しました:', e);
+      console.error('LocalStorage自動復元に失敗しました:', e);
     }
+  }
+  return false;
+}
+
+// 手動メモリ操作 (M+)
+function manualSaveState() {
+  if (!isLocalStorageAvailable()) {
+    alert('このブラウザ環境ではメモリ保存機能が使用できません（file:// スキーム起動時のセキュリティ制限など）。');
+    return;
+  }
+  // 手動メモリ用キー 'fx_margin_calc_memory'
+  localStorage.setItem('fx_margin_calc_memory', JSON.stringify(state));
+  flashSaveStatus('メモリ保存完了 (M+)');
+}
+
+// 手動メモリ操作 (MR)
+function manualLoadState() {
+  if (!isLocalStorageAvailable()) return;
+  
+  const saved = localStorage.getItem('fx_margin_calc_memory');
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      mergeStateData(parsed);
+      syncStateToUi();
+      updateDisplay();
+      
+      // 自動保存側にも同期させて状態を維持
+      saveStateToLocalStorage(false);
+      flashSaveStatus('メモリ読込完了 (MR)');
+    } catch (e) {
+      console.error('手動メモリ読込に失敗しました:', e);
+    }
+  } else {
+    alert('保存されたメモリデータが見つかりません。先に「M+」をクリックして保存してください。');
+  }
+}
+
+// 手動メモリ操作 (MC)
+function manualClearState() {
+  if (!isLocalStorageAvailable()) return;
+  localStorage.removeItem('fx_margin_calc_memory');
+  flashSaveStatus('メモリ消去完了 (MC)');
+}
+
+// URLパラメータからの復元
+function loadStateFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const dataParam = params.get('data');
+  if (dataParam) {
+    try {
+      // UTF-8セーフなBase64デコード
+      const decodedData = decodeURIComponent(escape(atob(dataParam)));
+      const parsed = JSON.parse(decodedData);
+      
+      mergeStateData(parsed);
+      syncStateToUi();
+      
+      // URLのパラメータを消してクリーンにする
+      const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+      window.history.replaceState(null, '', cleanUrl);
+      
+      // 復元されたデータを即座にローカルに自動保存
+      saveStateToLocalStorage(true, '共有URLから数値を読込');
+      return true;
+    } catch (e) {
+      console.error('URLデータパラメータの復元に失敗しました:', e);
+    }
+  }
+  return false;
+}
+
+// stateオブジェクトへのマージ処理
+function mergeStateData(parsed) {
+  if (parsed.accountBalance !== undefined) state.accountBalance = parsed.accountBalance;
+  if (parsed.leverage !== undefined) state.leverage = parsed.leverage;
+  if (parsed.lotSize !== undefined) state.lotSize = parsed.lotSize;
+  if (parsed.losscutThreshold !== undefined) state.losscutThreshold = parsed.losscutThreshold;
+  
+  if (parsed.positions) state.positions = parsed.positions;
+  if (parsed.newOrder) state.newOrder = { ...state.newOrder, ...parsed.newOrder };
+  if (parsed.rates) state.rates = { ...state.rates, ...parsed.rates };
+  if (parsed.swapSim) state.swapSim = { ...state.swapSim, ...parsed.swapSim };
+}
+
+// 共有URLを生成してクリップボードにコピー
+function generateShareUrl() {
+  try {
+    const rawString = JSON.stringify(state);
+    const base64Str = btoa(unescape(encodeURIComponent(rawString)));
+    
+    const shareUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?data=' + base64Str;
+    
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      if (els.shareStatusText) {
+        els.shareStatusText.classList.remove('hidden');
+        els.shareStatusText.style.opacity = '1';
+        
+        setTimeout(() => {
+          els.shareStatusText.style.opacity = '0';
+          setTimeout(() => {
+            els.shareStatusText.classList.add('hidden');
+          }, 250);
+        }, 2000);
+      }
+    });
+  } catch (e) {
+    console.error('共有URLの作成に失敗しました:', e);
+    alert('URLの作成に失敗しました。');
   }
 }
 
@@ -303,7 +445,6 @@ async function fetchRealtimeRates() {
         }
       });
       
-      // 入力フォーム側の表示を更新
       CURRENCY_PAIRS.forEach(pair => {
         const inputEl = document.getElementById(`rate-input-${pair.code.replace('/', '-')}`);
         if (inputEl) {
@@ -311,11 +452,10 @@ async function fetchRealtimeRates() {
         }
       });
       
-      // 新規シミュレーション注文の単価も現在のペアレートへ同期
+      // 新規シミュレーション注文単価を同期
       state.newOrder.price = state.rates[state.newOrder.pair];
       els.newPrice.value = state.rates[state.newOrder.pair];
       
-      // 更新日時の反映
       const now = new Date();
       const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
       if (updateTimeEl) {
@@ -399,7 +539,7 @@ function buildRatesInputs() {
           els.newPrice.value = val;
         }
         updateDisplay();
-        saveStateToLocalStorage(true);
+        saveStateToLocalStorage(true, '設定レートを保存');
       }
     });
     
@@ -527,7 +667,7 @@ function renderPositions() {
     `;
     btnDel.addEventListener('click', () => {
       removePosition(pos.id);
-      saveStateToLocalStorage(true);
+      saveStateToLocalStorage(true, 'ポジションを削除');
     });
     tdAction.appendChild(btnDel);
     
@@ -703,7 +843,6 @@ function calculateSwapSimulation() {
   const lots = state.swapSim.lots;
   const point = state.swapSim.point;
   
-  // ルールに基づく単位自動補正判定：MXN/JPYとZAR/JPYは10万通貨表記のため10で除算
   let isCorrected = false;
   let noteText = '※1ロット（1万通貨）あたりのスワップ値を入力';
   
@@ -720,7 +859,6 @@ function calculateSwapSimulation() {
   const monthlyAmount = dailyAmount * 30;
   const yearlyAmount = dailyAmount * 365;
   
-  // カンマ付きで表示
   els.swapResDay.textContent = formatNumberWithCommas(Math.round(dailyAmount));
   els.swapResMonth.textContent = formatNumberWithCommas(Math.round(monthlyAmount));
   els.swapResYear.textContent = formatNumberWithCommas(Math.round(yearlyAmount));
@@ -757,7 +895,7 @@ function initChart() {
           data: Array(13).fill(0),
           borderColor: '#059669',
           backgroundColor: 'rgba(5, 150, 105, 0.18)',
-          fill: '-1', // 下のデータセットから積み上げ
+          fill: '-1',
           tension: 0.1,
           pointRadius: 4,
           pointHoverRadius: 6,
@@ -811,8 +949,8 @@ function initChart() {
           }
         },
         y: {
-          min: 0, // Y軸を0スタートに強制設定
-          stacked: true, // 積み上げを設定
+          min: 0,
+          stacked: true,
           grid: {
             color: 'rgba(0, 0, 0, 0.04)'
           },
@@ -834,7 +972,6 @@ function updateChart() {
   
   const balance = state.accountBalance;
   
-  // 想定スワップシミュレーターに入力された「1日スワップ」から推移データを生成
   const pairCode = state.swapSim.pair;
   const lots = state.swapSim.lots;
   const point = state.swapSim.point;
@@ -913,7 +1050,6 @@ function updateDisplay() {
     const decimals = targetPair.pipSize === 0.01 ? 3 : 4;
     const unit = targetPair.type === 'jpy' ? '円' : 'ドル';
     
-    // レートも適宜カンマ適用（ドルはそのまま、円はカンマ）
     els.losscutRate.textContent = targetPair.type === 'jpy' ? formatNumberWithCommas(parseFloat(lcInfo.losscutRate.toFixed(decimals))) : lcInfo.losscutRate.toFixed(decimals);
     els.losscutDistance.textContent = `${targetPair.type === 'jpy' ? formatNumberWithCommas(parseFloat(lcInfo.distance.toFixed(decimals))) : lcInfo.distance.toFixed(decimals)}${unit} (${lcInfo.pips.toFixed(1)} pips)`;
   }
@@ -973,7 +1109,7 @@ function registerEventListeners() {
   setupCommaFormatting(els.accountBalance, (val) => {
     state.accountBalance = val;
     updateDisplay();
-    saveStateToLocalStorage(true);
+    saveStateToLocalStorage(true, '残高を自動保存');
   });
   
   // レバレッジ変更
@@ -986,7 +1122,7 @@ function registerEventListeners() {
       state.leverage = parseFloat(e.target.value);
     }
     updateDisplay();
-    saveStateToLocalStorage(true);
+    saveStateToLocalStorage(true, 'レバレッジを自動保存');
   });
   
   els.leverageCustom.addEventListener('input', (e) => {
@@ -994,7 +1130,7 @@ function registerEventListeners() {
     if (!isNaN(val) && val > 0) {
       state.leverage = val;
       updateDisplay();
-      saveStateToLocalStorage(true);
+      saveStateToLocalStorage(true, 'レバレッジを自動保存');
     }
   });
   
@@ -1008,7 +1144,7 @@ function registerEventListeners() {
       state.lotSize = parseFloat(e.target.value);
     }
     updateDisplay();
-    saveStateToLocalStorage(true);
+    saveStateToLocalStorage(true, 'ロットサイズを自動保存');
   });
   
   els.lotSizeCustom.addEventListener('input', (e) => {
@@ -1016,14 +1152,14 @@ function registerEventListeners() {
     if (!isNaN(val) && val > 0) {
       state.lotSize = val;
       updateDisplay();
-      saveStateToLocalStorage(true);
+      saveStateToLocalStorage(true, 'ロットサイズを自動保存');
     }
   });
   
   // ポジション追加ボタン
   els.addPositionBtn.addEventListener('click', () => {
     addPosition();
-    saveStateToLocalStorage(true);
+    saveStateToLocalStorage(true, 'ポジションを追加');
   });
   
   // 新規シミュレーション通貨ペア変更
@@ -1036,7 +1172,7 @@ function registerEventListeners() {
     els.newPrice.value = currentPrice;
     
     updateDisplay();
-    saveStateToLocalStorage(true);
+    saveStateToLocalStorage(true, '新規注文設定を自動保存');
   });
   
   // 新規シミュレーション売買方向変更
@@ -1044,7 +1180,7 @@ function registerEventListeners() {
     radio.addEventListener('change', (e) => {
       state.newOrder.direction = e.target.value;
       updateDisplay();
-      saveStateToLocalStorage(true);
+      saveStateToLocalStorage(true, '新規注文設定を自動保存');
     });
   });
   
@@ -1054,7 +1190,7 @@ function registerEventListeners() {
     if (!isNaN(val) && val >= 0) {
       state.newOrder.lots = val;
       updateDisplay();
-      saveStateToLocalStorage(true);
+      saveStateToLocalStorage(true, '新規注文設定を自動保存');
     }
   });
   
@@ -1064,7 +1200,7 @@ function registerEventListeners() {
     if (!isNaN(val) && val >= 0) {
       state.newOrder.price = val;
       updateDisplay();
-      saveStateToLocalStorage(true);
+      saveStateToLocalStorage(true, '新規注文設定を自動保存');
     }
   });
   
@@ -1072,7 +1208,7 @@ function registerEventListeners() {
   els.losscutThreshold.addEventListener('change', (e) => {
     state.losscutThreshold = parseFloat(e.target.value);
     updateDisplay();
-    saveStateToLocalStorage(true);
+    saveStateToLocalStorage(true, 'ロスカット基準を自動保存');
   });
   
   // レート設定アコーディオンの開閉
@@ -1106,7 +1242,7 @@ function registerEventListeners() {
       els.swapSimPoint.value = state.swapSim.point;
       
       updateDisplay();
-      saveStateToLocalStorage(true);
+      saveStateToLocalStorage(true, 'スワップ設定を自動保存');
     });
     
     // 想定スワップロット数変更
@@ -1115,7 +1251,7 @@ function registerEventListeners() {
       if (!isNaN(val) && val >= 0) {
         state.swapSim.lots = val;
         updateDisplay();
-        saveStateToLocalStorage(true);
+        saveStateToLocalStorage(true, 'スワップ設定を自動保存');
       }
     });
     
@@ -1125,9 +1261,25 @@ function registerEventListeners() {
       if (!isNaN(val) && val >= 0) {
         state.swapSim.point = val;
         updateDisplay();
-        saveStateToLocalStorage(true);
+        saveStateToLocalStorage(true, 'スワップ設定を自動保存');
       }
     });
+  }
+
+  // 手動メモリ操作ボタンイベント登録
+  if (els.memSaveBtn) {
+    els.memSaveBtn.addEventListener('click', manualSaveState);
+  }
+  if (els.memLoadBtn) {
+    els.memLoadBtn.addEventListener('click', manualLoadState);
+  }
+  if (els.memClearBtn) {
+    els.memClearBtn.addEventListener('click', manualClearState);
+  }
+
+  // 共有URLコピーイベント登録
+  if (els.shareUrlBtn) {
+    els.shareUrlBtn.addEventListener('click', generateShareUrl);
   }
 }
 
