@@ -37,6 +37,8 @@ let state = {
   }
 };
 
+let assetChart = null;
+
 // ===== DOM要素の取得 =====
 const els = {
   accountBalance: document.getElementById('account-balance'),
@@ -109,14 +111,61 @@ async function init() {
   // ポジションテーブルの描画
   renderPositions();
   
+  // 資産推移面グラフの初期化
+  initChart();
+  
   // イベントリスナー登録
   registerEventListeners();
   
-  // 初期計算とスワップ計算
+  // 初期計算とスワップ計算とグラフ描画
   updateDisplay();
   
   // リアルタイム為替レートの取得
   await fetchRealtimeRates();
+}
+
+// ===== ユーティリティ（カンマフォーマット） =====
+
+// 数値文字列のカンマ除去と数値パース
+function parseFormattedNumber(valStr) {
+  if (valStr === undefined || valStr === null) return 0;
+  const clean = valStr.toString().replace(/,/g, '');
+  const num = parseFloat(clean);
+  return isNaN(num) ? 0 : num;
+}
+
+// 数値を3桁カンマ付き文字列に変換
+function formatNumberWithCommas(num) {
+  if (num === undefined || num === null || isNaN(num)) return '0';
+  const parts = num.toString().split('.');
+  parts[0] = parseFloat(parts[0]).toLocaleString('ja-JP');
+  return parts.join('.');
+}
+
+// テキスト入力欄への双方向カンマフォーマット適用ヘルパー
+function setupCommaFormatting(inputEl, valueUpdateCallback) {
+  // 初期表示のフォーマット
+  const initialRawVal = parseFormattedNumber(inputEl.value);
+  inputEl.value = formatNumberWithCommas(initialRawVal);
+
+  // フォーカス時にカンマを除去して数値入力可能にする
+  inputEl.addEventListener('focus', (e) => {
+    const rawVal = parseFormattedNumber(e.target.value);
+    e.target.value = rawVal === 0 ? '' : rawVal;
+  });
+
+  // フォーカスアウト（確定）時にカンマを再適用し、状態を確定
+  inputEl.addEventListener('blur', (e) => {
+    const rawVal = parseFormattedNumber(e.target.value);
+    e.target.value = formatNumberWithCommas(rawVal);
+    valueUpdateCallback(rawVal);
+  });
+
+  // 入力中に即時反映
+  inputEl.addEventListener('input', (e) => {
+    const rawVal = parseFormattedNumber(e.target.value);
+    valueUpdateCallback(rawVal);
+  });
 }
 
 // ===== 機能別の関数群 =====
@@ -157,8 +206,8 @@ function loadStateFromLocalStorage() {
       if (parsed.rates) state.rates = { ...state.rates, ...parsed.rates };
       if (parsed.swapSim) state.swapSim = { ...state.swapSim, ...parsed.swapSim };
       
-      // フォーム各値の復元
-      els.accountBalance.value = state.accountBalance;
+      // フォーム各値の復元（口座残高はカンマフォーマット）
+      els.accountBalance.value = formatNumberWithCommas(state.accountBalance);
       
       els.leverageSelect.value = [25, 20, 10, 5, 1].includes(state.leverage) ? state.leverage : 'custom';
       if (els.leverageSelect.value === 'custom') {
@@ -273,7 +322,6 @@ async function fetchRealtimeRates() {
         updateTimeEl.textContent = `レート最終更新: ${timeStr}`;
       }
       
-      // メモリへ保存
       saveStateToLocalStorage(false);
     }
   } catch (error) {
@@ -305,7 +353,6 @@ function buildPairSelectors() {
     els.newPair.appendChild(opt);
   });
   
-  // 初期値の同期
   els.newPair.value = state.newOrder.pair;
   els.newPrice.value = state.newOrder.price;
 }
@@ -440,37 +487,29 @@ function renderPositions() {
     });
     tdLots.appendChild(inputLots);
     
-    // 評価損益セル
+    // 評価損益セル（カンマフォーマット適用）
     const tdProfit = document.createElement('td');
     const inputProfit = document.createElement('input');
-    inputProfit.type = 'number';
+    inputProfit.type = 'text';
     inputProfit.className = 'table-input';
-    inputProfit.value = pos.profit;
-    inputProfit.step = '100';
-    inputProfit.addEventListener('input', (e) => {
-      const val = parseFloat(e.target.value);
-      if (!isNaN(val)) {
-        pos.profit = val;
-        updateDisplay();
-        saveStateToLocalStorage(true);
-      }
+    inputProfit.value = formatNumberWithCommas(pos.profit);
+    setupCommaFormatting(inputProfit, (val) => {
+      pos.profit = val;
+      updateDisplay();
+      saveStateToLocalStorage(true);
     });
     tdProfit.appendChild(inputProfit);
     
-    // スワップセル
+    // スワップセル（カンマフォーマット適用）
     const tdSwap = document.createElement('td');
     const inputSwap = document.createElement('input');
-    inputSwap.type = 'number';
+    inputSwap.type = 'text';
     inputSwap.className = 'table-input';
-    inputSwap.value = pos.swap;
-    inputSwap.step = '100';
-    inputSwap.addEventListener('input', (e) => {
-      const val = parseFloat(e.target.value);
-      if (!isNaN(val)) {
-        pos.swap = val;
-        updateDisplay();
-        saveStateToLocalStorage(true);
-      }
+    inputSwap.value = formatNumberWithCommas(pos.swap);
+    setupCommaFormatting(inputSwap, (val) => {
+      pos.swap = val;
+      updateDisplay();
+      saveStateToLocalStorage(true);
     });
     tdSwap.appendChild(inputSwap);
     
@@ -675,31 +714,162 @@ function calculateSwapSimulation() {
   
   els.swapSimNote.textContent = noteText;
   
-  // 1ロット（1万通貨）あたりに正規化したスワップ値
   const pointNormalized = isCorrected ? (point / 10) : point;
   
-  // 各期間の想定スワップ金額（円）
   const dailyAmount = lots * pointNormalized;
   const monthlyAmount = dailyAmount * 30;
   const yearlyAmount = dailyAmount * 365;
   
-  els.swapResDay.textContent = Math.round(dailyAmount).toLocaleString();
-  els.swapResMonth.textContent = Math.round(monthlyAmount).toLocaleString();
-  els.swapResYear.textContent = Math.round(yearlyAmount).toLocaleString();
+  // カンマ付きで表示
+  els.swapResDay.textContent = formatNumberWithCommas(Math.round(dailyAmount));
+  els.swapResMonth.textContent = formatNumberWithCommas(Math.round(monthlyAmount));
+  els.swapResYear.textContent = formatNumberWithCommas(Math.round(yearlyAmount));
+}
+
+// ===== 積み上げ面グラフ (Chart.js) =====
+
+// グラフ初期化
+function initChart() {
+  const canvas = document.getElementById('asset-chart');
+  if (!canvas) return;
+  
+  const ctx = canvas.getContext('2d');
+  const labels = ['初期', '1ヶ月', '2ヶ月', '3ヶ月', '4ヶ月', '5ヶ月', '6ヶ月', '7ヶ月', '8ヶ月', '9ヶ月', '10ヶ月', '11ヶ月', '12ヶ月'];
+  
+  assetChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [
+        {
+          label: '口座残高 (元本)',
+          data: Array(13).fill(0),
+          borderColor: '#2563eb',
+          backgroundColor: 'rgba(37, 99, 235, 0.12)',
+          fill: 'origin',
+          tension: 0.1,
+          pointRadius: 4,
+          pointHoverRadius: 6,
+          borderWidth: 2
+        },
+        {
+          label: 'スワップ積立累計',
+          data: Array(13).fill(0),
+          borderColor: '#059669',
+          backgroundColor: 'rgba(5, 150, 105, 0.18)',
+          fill: '-1', // 下のデータセットから積み上げ
+          tension: 0.1,
+          pointRadius: 4,
+          pointHoverRadius: 6,
+          borderWidth: 2
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'top',
+          labels: {
+            color: '#475569',
+            font: {
+              family: 'Inter, sans-serif',
+              weight: '600'
+            }
+          }
+        },
+        tooltip: {
+          mode: 'index',
+          intersect: false,
+          callbacks: {
+            label: function(context) {
+              let label = context.dataset.label || '';
+              if (label) {
+                label += ': ';
+              }
+              if (context.parsed.y !== null) {
+                label += Math.round(context.parsed.y).toLocaleString('ja-JP') + ' 円';
+              }
+              return label;
+            }
+          }
+        }
+      },
+      interaction: {
+        mode: 'nearest',
+        axis: 'x',
+        intersect: false
+      },
+      scales: {
+        x: {
+          grid: {
+            color: 'rgba(0, 0, 0, 0.04)'
+          },
+          ticks: {
+            color: '#64748b'
+          }
+        },
+        y: {
+          stacked: true, // 積み上げを設定
+          grid: {
+            color: 'rgba(0, 0, 0, 0.04)'
+          },
+          ticks: {
+            color: '#64748b',
+            callback: function(value) {
+              return (value / 10000).toLocaleString('ja-JP') + ' 万';
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+// グラフデータの更新
+function updateChart() {
+  if (!assetChart) return;
+  
+  const balance = state.accountBalance;
+  
+  // 想定スワップシミュレーターに入力された「1日スワップ」から推移データを生成
+  const pairCode = state.swapSim.pair;
+  const lots = state.swapSim.lots;
+  const point = state.swapSim.point;
+  
+  let isCorrected = false;
+  if (pairCode === 'MXN/JPY' || pairCode === 'ZAR/JPY') {
+    isCorrected = true;
+  }
+  const pointNormalized = isCorrected ? (point / 10) : point;
+  const dailySwap = lots * pointNormalized;
+  
+  const balanceData = [];
+  const swapAccumData = [];
+  
+  for (let i = 0; i <= 12; i++) {
+    balanceData.push(balance);
+    swapAccumData.push(dailySwap * 30 * i);
+  }
+  
+  assetChart.data.datasets[0].data = balanceData;
+  assetChart.data.datasets[1].data = swapAccumData;
+  assetChart.update();
 }
 
 // 画面全体の表示更新
 function updateDisplay() {
   const metrics = calculateMargins();
   
-  // 現在保有状況
-  els.calcEquity.textContent = Math.round(metrics.currentEquity).toLocaleString();
-  els.calcMargin.textContent = Math.round(metrics.currentTotalMargin).toLocaleString();
+  // 現在保有状況 (カンマフォーマット適用)
+  els.calcEquity.textContent = formatNumberWithCommas(Math.round(metrics.currentEquity));
+  els.calcMargin.textContent = formatNumberWithCommas(Math.round(metrics.currentTotalMargin));
   els.calcRatioText.textContent = metrics.currentTotalMargin > 0 ? metrics.currentRatio.toFixed(2) + '%' : '---';
   
-  // 新規注文追加後
-  els.simEquity.textContent = Math.round(metrics.simEquity).toLocaleString();
-  els.simMargin.textContent = Math.round(metrics.simTotalMargin).toLocaleString();
+  // 新規注文追加後 (カンマフォーマット適用)
+  els.simEquity.textContent = formatNumberWithCommas(Math.round(metrics.simEquity));
+  els.simMargin.textContent = formatNumberWithCommas(Math.round(metrics.simTotalMargin));
   els.calcRatio.textContent = metrics.simTotalMargin > 0 ? metrics.simRatio.toFixed(2) + '%' : '---';
   
   // ゲージ内テキストとゲージ描画
@@ -742,12 +912,16 @@ function updateDisplay() {
     const decimals = targetPair.pipSize === 0.01 ? 3 : 4;
     const unit = targetPair.type === 'jpy' ? '円' : 'ドル';
     
-    els.losscutRate.textContent = lcInfo.losscutRate.toFixed(decimals);
-    els.losscutDistance.textContent = `${lcInfo.distance.toFixed(decimals)}${unit} (${lcInfo.pips.toFixed(1)} pips)`;
+    // レートも適宜カンマ適用（ドルはそのまま、円はカンマ）
+    els.losscutRate.textContent = targetPair.type === 'jpy' ? formatNumberWithCommas(parseFloat(lcInfo.losscutRate.toFixed(decimals))) : lcInfo.losscutRate.toFixed(decimals);
+    els.losscutDistance.textContent = `${targetPair.type === 'jpy' ? formatNumberWithCommas(parseFloat(lcInfo.distance.toFixed(decimals))) : lcInfo.distance.toFixed(decimals)}${unit} (${lcInfo.pips.toFixed(1)} pips)`;
   }
   
   // スワップシミュレーション計算
   calculateSwapSimulation();
+  
+  // 積み上げ面グラフ更新
+  updateChart();
 }
 
 // ゲージ描画の更新
@@ -794,14 +968,11 @@ function updateSafetyIndicator(ratio, margin) {
 
 // ===== イベントリスナー設定 =====
 function registerEventListeners() {
-  // 口座残高変更
-  els.accountBalance.addEventListener('input', (e) => {
-    const val = parseFloat(e.target.value);
-    if (!isNaN(val) && val >= 0) {
-      state.accountBalance = val;
-      updateDisplay();
-      saveStateToLocalStorage(true);
-    }
+  // 口座残高フォーマット＆変更適用
+  setupCommaFormatting(els.accountBalance, (val) => {
+    state.accountBalance = val;
+    updateDisplay();
+    saveStateToLocalStorage(true);
   });
   
   // レバレッジ変更
@@ -924,7 +1095,6 @@ function registerEventListeners() {
   if (els.swapSimPair) {
     els.swapSimPair.addEventListener('change', (e) => {
       state.swapSim.pair = e.target.value;
-      // 適切な初期スワップ値をセット (MXN/JPY, ZAR/JPYは10万通貨あたり想定値、他は1万通貨あたり想定値)
       if (e.target.value === 'MXN/JPY' || e.target.value === 'ZAR/JPY') {
         state.swapSim.point = 280.0;
       } else if (e.target.value === 'TRY/JPY') {

@@ -876,3 +876,17 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* ===== 資産推移グラフ ===== */
+.card-chart {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+}
+
+.chart-container {
+  margin-top: 16px;
+  position: relative;
+  width: 100%;
+}
