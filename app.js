@@ -811,6 +811,7 @@ function initChart() {
           }
         },
         y: {
+          min: 0, // Y軸を0スタートに強制設定
           stacked: true, // 積み上げを設定
           grid: {
             color: 'rgba(0, 0, 0, 0.04)'
